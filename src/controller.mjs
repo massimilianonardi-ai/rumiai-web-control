@@ -51,6 +51,9 @@ const savedStorageState = await loadStorageState();
 const context = await chromium.launchPersistentContext(PROFILE_DIR, {
   headless: HEADLESS,
   executablePath: EXECUTABLE,
+  handleSIGHUP: false,
+  handleSIGINT: false,
+  handleSIGTERM: false,
   acceptDownloads: true,
   viewport: { width: 1440, height: 1000 },
   args: BROWSER_ARGS
