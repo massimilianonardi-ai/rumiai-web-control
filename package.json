@@ -1,0 +1,16 @@
+{
+  "name": "rumiai-web-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26 <27"
+  },
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "build": "node scripts/build-release.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}
