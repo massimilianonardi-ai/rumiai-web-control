@@ -51,7 +51,9 @@ jobs:
 
       - name: Run canonical mk lifecycle
         shell: bash
-        run: ./rumiai-os/m mk --project "$(pwd)/rumiai-web-control" check test build
+        env:
+          WEB_CONTROL_TEST_HEADLESS: '0'
+        run: xvfb-run -a ./rumiai-os/m mk --project "$(pwd)/rumiai-web-control" check test build
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
@@ -93,6 +95,8 @@ jobs:
 
       - name: Validate source and runtime
         shell: bash
+        env:
+          WEB_CONTROL_TEST_HEADLESS: '0'
         run: |
           node --version
           node --check src/controller.mjs

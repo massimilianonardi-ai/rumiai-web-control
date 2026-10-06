@@ -18,7 +18,7 @@ const fixture = await createFixtureServer();
 const env = {
   ...process.env,
   WEB_CONTROL_HOME: home,
-  WEB_CONTROL_HEADLESS: '1'
+  WEB_CONTROL_HEADLESS: process.env.WEB_CONTROL_TEST_HEADLESS ?? '1'
 };
 const socketPath = webControlSocketPath(env);
 
@@ -76,7 +76,7 @@ try {
   service = await startService();
   const status = await cli('status');
   assert.equal(status.profile, 'default');
-  assert.equal(status.headless, true);
+  assert.equal(status.headless, env.WEB_CONTROL_HEADLESS === '1');
 
   const page = await cli('page', 'new');
   await cli('page', 'navigate', page.id, fixture.baseUrl);
