@@ -1,0 +1,286 @@
+import fs from 'node:fs/promises';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
+import { chromium } from 'playwright';
+
+const HOME = process.env.WEB_CONTROL_HOME || path.join(os.homedir(), '.rumiai-web-control');
+const PROFILE = process.env.WEB_CONTROL_PROFILE || 'default';
+const SOCKET = process.env.WEB_CONTROL_SOCKET || path.join(HOME, 'run', 'web-control.sock');
+const PROFILE_DIR = process.env.WEB_CONTROL_PROFILE_DIR || path.join(HOME, 'profiles', PROFILE);
+const HEADLESS = process.env.WEB_CONTROL_HEADLESS === '1';
+const EXECUTABLE = process.env.WEB_CONTROL_BROWSER_EXECUTABLE || undefined;
+const BROWSER_ARGS = process.env.WEB_CONTROL_BROWSER_ARGS ? JSON.parse(process.env.WEB_CONTROL_BROWSER_ARGS) : [];
+
+if (!/^(?:[a-z0-9]|[a-z0-9][a-z0-9._-]*[a-z0-9])$/.test(PROFILE)) {
+  throw new Error(`invalid profile identity: ${PROFILE}`);
+}
+
+await fs.mkdir(PROFILE_DIR, { recursive: true });
+await fs.mkdir(path.dirname(SOCKET), { recursive: true });
+
+const context = await chromium.launchPersistentContext(PROFILE_DIR, {
+  headless: HEADLESS,
+  executablePath: EXECUTABLE,
+  acceptDownloads: true,
+  viewport: { width: 1440, height: 1000 },
+  args: BROWSER_ARGS
+});
+
+let nextPageId = 1;
+const pages = new Map();
+const pageIds = new WeakMap();
+
+function registerPage(page) {
+  let id = pageIds.get(page);
+  if (id) return id;
+  id = `page-${nextPageId++}`;
+  pages.set(id, page);
+  pageIds.set(page, id);
+  page.once('close', () => pages.delete(id));
+  return id;
+}
+
+for (const page of context.pages()) registerPage(page);
+context.on('page', registerPage);
+
+function requirePage(id) {
+  const page = pages.get(id);
+  if (!page) throw new Error(`unknown page: ${id}`);
+  return page;
+}
+
+async function describePage(id, page) {
+  return {
+    id,
+    url: page.url(),
+    title: await page.title().catch(() => '')
+  };
+}
+
+async function inspectStorage(page) {
+  const cookies = await context.cookies();
+  const storage = await page.evaluate(() => {
+    const local = {};
+    const session = {};
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      local[key] = localStorage.getItem(key);
+    }
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i);
+      session[key] = sessionStorage.getItem(key);
+    }
+    return { local, session };
+  });
+  return { cookies, ...storage };
+}
+
+async function capturePage(pageId, page, params) {
+  if (!params.outputDir) throw new Error('page.capture requires outputDir');
+  const outputDir = path.resolve(params.outputDir);
+  const formats = params.formats?.length ? params.formats : ['html', 'text', 'screenshot'];
+  const supported = new Set(['html', 'text', 'screenshot', 'mhtml']);
+  for (const format of formats) {
+    if (!supported.has(format)) throw new Error(`unsupported capture format: ${format}`);
+  }
+
+  await fs.mkdir(outputDir, { recursive: true });
+  const files = {};
+
+  if (formats.includes('html')) {
+    const filename = path.join(outputDir, 'page.html');
+    await fs.writeFile(filename, await page.content(), 'utf8');
+    files.html = filename;
+  }
+
+  if (formats.includes('text')) {
+    const filename = path.join(outputDir, 'page.txt');
+    const text = await page.locator('body').innerText().catch(() => '');
+    await fs.writeFile(filename, `${text}\n`, 'utf8');
+    files.text = filename;
+  }
+
+  if (formats.includes('screenshot')) {
+    const filename = path.join(outputDir, 'page.png');
+    await page.screenshot({ path: filename, fullPage: true });
+    files.screenshot = filename;
+  }
+
+  if (formats.includes('mhtml')) {
+    const filename = path.join(outputDir, 'page.mhtml');
+    const cdp = await context.newCDPSession(page);
+    try {
+      const snapshot = await cdp.send('Page.captureSnapshot', { format: 'mhtml' });
+      await fs.writeFile(filename, snapshot.data, 'utf8');
+      files.mhtml = filename;
+    } finally {
+      await cdp.detach();
+    }
+  }
+
+  const result = {
+    page: pageId,
+    url: page.url(),
+    title: await page.title().catch(() => ''),
+    capturedAt: new Date().toISOString(),
+    files
+  };
+  const metadata = path.join(outputDir, 'metadata.json');
+  await fs.writeFile(metadata, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+  files.metadata = metadata;
+  return result;
+}
+
+async function dispatch(method, params = {}) {
+  switch (method) {
+    case 'status':
+      return {
+        profile: PROFILE,
+        headless: HEADLESS,
+        pages: await Promise.all([...pages].map(([id, page]) => describePage(id, page)))
+      };
+
+    case 'page.new': {
+      const page = await context.newPage();
+      return describePage(registerPage(page), page);
+    }
+
+    case 'page.list':
+      return Promise.all([...pages].map(([id, page]) => describePage(id, page)));
+
+    case 'page.close': {
+      const page = requirePage(params.page);
+      await page.close();
+      return { page: params.page, closed: true };
+    }
+
+    case 'page.navigate': {
+      const page = requirePage(params.page);
+      const response = await page.goto(params.url, {
+        waitUntil: params.waitUntil || 'domcontentloaded',
+        timeout: params.timeout ?? 30000
+      });
+      return {
+        page: params.page,
+        url: page.url(),
+        title: await page.title().catch(() => ''),
+        status: response?.status() ?? null,
+        statusText: response?.statusText() ?? null
+      };
+    }
+
+    case 'page.inspect': {
+      const page = requirePage(params.page);
+      switch (params.kind || 'summary') {
+        case 'summary':
+          return describePage(params.page, page);
+        case 'html':
+          return { page: params.page, html: await page.content() };
+        case 'text':
+          return { page: params.page, text: await page.locator('body').innerText().catch(() => '') };
+        case 'storage':
+          return { page: params.page, ...(await inspectStorage(page)) };
+        default:
+          throw new Error(`unsupported inspect kind: ${params.kind}`);
+      }
+    }
+
+    case 'page.capture':
+      return capturePage(params.page, requirePage(params.page), params);
+
+    case 'page.click': {
+      const page = requirePage(params.page);
+      await page.locator(params.target).click({ timeout: params.timeout ?? 10000 });
+      return { page: params.page, target: params.target };
+    }
+
+    case 'page.fill': {
+      const page = requirePage(params.page);
+      await page.locator(params.target).fill(params.value ?? '', { timeout: params.timeout ?? 10000 });
+      return { page: params.page, target: params.target };
+    }
+
+    case 'page.press': {
+      const page = requirePage(params.page);
+      await page.locator(params.target).press(params.key, { timeout: params.timeout ?? 10000 });
+      return { page: params.page, target: params.target, key: params.key };
+    }
+
+    case 'debug.cdp': {
+      const page = requirePage(params.page);
+      if (!params.method || typeof params.method !== 'string') throw new Error('debug.cdp requires method');
+      const cdp = await context.newCDPSession(page);
+      try {
+        return await cdp.send(params.method, params.params || {});
+      } finally {
+        await cdp.detach();
+      }
+    }
+
+    default:
+      throw new Error(`unknown method: ${method}`);
+  }
+}
+
+async function removeSocket() {
+  try {
+    const stat = await fs.lstat(SOCKET);
+    if (!stat.isSocket()) throw new Error(`refusing to remove non-socket path: ${SOCKET}`);
+    await fs.unlink(SOCKET);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+}
+
+await removeSocket();
+
+const server = net.createServer((socket) => {
+  socket.setEncoding('utf8');
+  let buffer = '';
+
+  socket.on('data', async (chunk) => {
+    buffer += chunk;
+    while (true) {
+      const newline = buffer.indexOf('\n');
+      if (newline < 0) break;
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line) continue;
+
+      let request;
+      try {
+        request = JSON.parse(line);
+        const result = await dispatch(request.method, request.params);
+        socket.write(`${JSON.stringify({ id: request.id ?? null, ok: true, result })}\n`);
+      } catch (error) {
+        socket.write(`${JSON.stringify({
+          id: request?.id ?? null,
+          ok: false,
+          error: { message: String(error?.message || error) }
+        })}\n`);
+      }
+    }
+  });
+});
+
+await new Promise((resolve, reject) => {
+  server.once('error', reject);
+  server.listen(SOCKET, resolve);
+});
+await fs.chmod(SOCKET, 0o600);
+console.log(JSON.stringify({ event: 'ready', socket: SOCKET, profile: PROFILE, headless: HEADLESS }));
+
+let stopping = false;
+async function shutdown(code) {
+  if (stopping) return;
+  stopping = true;
+  await new Promise((resolve) => server.close(resolve));
+  await context.close().catch(() => {});
+  await removeSocket().catch(() => {});
+  process.exit(code);
+}
+
+process.on('SIGINT', () => shutdown(0));
+process.on('SIGTERM', () => shutdown(0));
