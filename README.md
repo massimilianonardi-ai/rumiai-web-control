@@ -29,6 +29,15 @@ The package launcher supplies an isolated package HOME. `web-control-service` st
 
 The ordinary browser mode is visible (`headless=false`). `WEB_CONTROL_HEADLESS=1` exists for automated validation and non-graphical environments.
 
+The released package depends on provider-independent runtime facilities:
+
+```text
+nodejs =26
+chromium =1
+```
+
+The `chromium` facility supplies the browser executable. The release artifact contains the pinned Playwright JavaScript runtime but does not embed or download a browser.
+
 ## Public command baseline
 
 ```text
@@ -51,9 +60,9 @@ Page identifiers are opaque runtime identities. The current `target` representat
 
 ## Development lifecycle
 
-The project is managed by `mk`. The current `mk` runtime itself requires the managed `nodejs` package default and executes the project lifecycle with that Node.js environment. `rumiai-web-control` therefore does not duplicate that already-required development-runtime condition as a second `mk` facility requirement. The released `rumiai-web-control` package will independently declare its runtime dependency on the provider-independent `nodejs` facility.
+The project is managed by `mk`. The current `mk` runtime itself requires the managed Node.js package default and executes the project lifecycle with that Node.js environment.
 
-After development dependencies are present:
+After JavaScript dependencies are present and a Chromium executable is available through `PATH` or `WEB_CONTROL_BROWSER_EXECUTABLE`:
 
 ```text
 mk check
@@ -61,11 +70,12 @@ mk test
 mk build
 ```
 
-For direct non-`m` development, install the pinned dependency and hermetic browser first:
+For direct non-`m` development:
 
 ```text
 npm install
-PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium
+WEB_CONTROL_BROWSER_EXECUTABLE=/path/to/chromium npm test
+npm run build
 ```
 
-`mk build` requires the hermetic Playwright browser to already be present and emits a platform-specific tarball under `dist/`. The release artifact includes `node_modules` plus the Playwright-managed Chromium browser so the installed runtime does not perform `npm install` or browser downloads.
+`mk build` emits the platform-independent artifact `dist/rumiai-web-control-v<version>-all.tar.gz`. The artifact contains `node_modules` and therefore performs no `npm install` at runtime. Browser acquisition remains owned by the `chromium` package/facility.

@@ -9,13 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout web-control
@@ -24,74 +20,73 @@ jobs:
           path: rumiai-web-control
 
       - name: Checkout exact rumiai-os revision
-        if: runner.os == 'Linux'
         uses: actions/checkout@v4
         with:
           repository: massimilianonardi-ai/rumiai-os
           ref: f4d28822c4a2a875bd816ec3b15477dcfa905706
           path: rumiai-os
 
-      - name: Select runner platform and install managed Node.js runtime
-        if: runner.os == 'Linux'
+      - name: Select runner platform and install managed runtimes
         shell: bash
         run: |
           ./rumiai-os/m osarch update
-          ./rumiai-os/m pkg install nodejs
+          ./rumiai-os/m pkg install nodejs chromium
           ./rumiai-os/m pkg default nodejs
+          ./rumiai-os/m pkg default chromium
           ./rumiai-os/m node --version
+          ./rumiai-os/m chromium --version
 
-      - name: Prepare Node.js 26 fallback on macOS
-        if: runner.os == 'macOS'
+      - name: Install pinned JavaScript dependencies
+        working-directory: rumiai-web-control
+        shell: bash
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: ../rumiai-os/m npm install
+
+      - name: Run canonical mk lifecycle
+        shell: bash
+        run: ./rumiai-os/m mk --project "$(pwd)/rumiai-web-control" check test build
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rumiai-web-control-all
+          path: rumiai-web-control/dist/rumiai-web-control-v*-all.tar.gz
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout web-control
+        uses: actions/checkout@v4
+
+      - name: Prepare Node.js 26
         uses: actions/setup-node@v4
         with:
           node-version: '26'
 
-      - name: Install project dependency on Linux
-        if: runner.os == 'Linux'
-        working-directory: rumiai-web-control
+      - name: Resolve installed Chromium-class browser
         shell: bash
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: '0'
-        run: ../rumiai-os/m npm install
+        run: |
+          if [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
+            echo "WEB_CONTROL_BROWSER_EXECUTABLE=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> "$GITHUB_ENV"
+          elif [ -x "/Applications/Chromium.app/Contents/MacOS/Chromium" ]; then
+            echo "WEB_CONTROL_BROWSER_EXECUTABLE=/Applications/Chromium.app/Contents/MacOS/Chromium" >> "$GITHUB_ENV"
+          else
+            echo "No Chromium-class browser available on the macOS runner" >&2
+            exit 1
+          fi
 
-      - name: Install project dependency on macOS
-        if: runner.os == 'macOS'
-        working-directory: rumiai-web-control
+      - name: Install pinned JavaScript dependencies
         shell: bash
         env:
-          PLAYWRIGHT_BROWSERS_PATH: '0'
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm install
 
-      - name: Install Playwright Chromium on Linux
-        if: runner.os == 'Linux'
-        working-directory: rumiai-web-control
+      - name: Validate source and runtime
         shell: bash
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: '0'
-        run: ../rumiai-os/m npx playwright install --with-deps chromium
-
-      - name: Install Playwright Chromium on macOS
-        if: runner.os == 'macOS'
-        working-directory: rumiai-web-control
-        shell: bash
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: '0'
-        run: npx playwright install chromium
-
-      - name: Run canonical mk lifecycle on Linux
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: '0'
-        run: |
-          ./rumiai-os/m mk --project "$(pwd)/rumiai-web-control" check test build
-
-      - name: Run equivalent runtime/build validation on macOS
-        if: runner.os == 'macOS'
-        working-directory: rumiai-web-control
-        shell: bash
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: '0'
         run: |
           node --version
           node --check src/controller.mjs
@@ -99,18 +94,10 @@ jobs:
           node --check tests/run.mjs
           node --check scripts/build-release.mjs
           npm test
-          npm run build
-
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rumiai-web-control-${{ runner.os }}-${{ runner.arch }}
-          path: rumiai-web-control/dist/*.tar.gz
-          if-no-files-found: error
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [linux, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -119,11 +106,11 @@ jobs:
       - name: Checkout release metadata
         uses: actions/checkout@v4
 
-      - name: Download built artifacts
+      - name: Download built artifact
         uses: actions/download-artifact@v4
         with:
+          name: rumiai-web-control-all
           path: artifacts
-          merge-multiple: true
 
       - name: Publish versioned release if absent
         shell: bash
