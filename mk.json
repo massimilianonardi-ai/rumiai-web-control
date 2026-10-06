@@ -1,62 +1,79 @@
 {
   "version": 2,
   "goals": {
-    "check": ["check-controller", "check-client", "check-test", "check-build"],
-    "test": ["test"],
-    "build": ["build-release"]
-  },
-  "requirements": {
-    "nodejs": {
-      "type": "facility",
-      "facility": "nodejs",
-      "constraints": ["=26"]
-    }
+    "check": [
+      "check-controller",
+      "check-client",
+      "check-test",
+      "check-build"
+    ],
+    "test": [
+      "test"
+    ],
+    "build": [
+      "build-release"
+    ]
   },
   "operations": {
     "check-controller": {
-      "requirements": ["nodejs"],
       "action": {
         "type": "process",
         "command": "node",
-        "args": ["--check", "src/controller.mjs"]
+        "args": [
+          "--check",
+          "src/controller.mjs"
+        ]
       }
     },
     "check-client": {
-      "requirements": ["nodejs"],
       "action": {
         "type": "process",
         "command": "node",
-        "args": ["--check", "src/client.mjs"]
+        "args": [
+          "--check",
+          "src/client.mjs"
+        ]
       }
     },
     "check-test": {
-      "requirements": ["nodejs"],
       "action": {
         "type": "process",
         "command": "node",
-        "args": ["--check", "tests/run.mjs"]
+        "args": [
+          "--check",
+          "tests/run.mjs"
+        ]
       }
     },
     "check-build": {
-      "requirements": ["nodejs"],
       "action": {
         "type": "process",
         "command": "node",
-        "args": ["--check", "scripts/build-release.mjs"]
+        "args": [
+          "--check",
+          "scripts/build-release.mjs"
+        ]
       }
     },
     "test": {
-      "requirements": ["nodejs"],
-      "prerequisites": ["check-controller", "check-client", "check-test"],
+      "prerequisites": [
+        "check-controller",
+        "check-client",
+        "check-test"
+      ],
       "action": {
         "type": "process",
         "command": "npm",
-        "args": ["test"]
+        "args": [
+          "test"
+        ]
       }
     },
     "build-release": {
-      "requirements": ["nodejs"],
-      "prerequisites": ["test", "check-build"],
+      "prerequisites": [
+        "test",
+        "check-build"
+      ],
       "outputs": {
         "artifact": {
           "path": "dist/release-artifact"
@@ -65,7 +82,10 @@
       "action": {
         "type": "process",
         "command": "npm",
-        "args": ["run", "build"]
+        "args": [
+          "run",
+          "build"
+        ]
       }
     }
   }
