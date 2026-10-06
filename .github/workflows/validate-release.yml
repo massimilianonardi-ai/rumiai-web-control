@@ -30,9 +30,10 @@ jobs:
           ref: f4d28822c4a2a875bd816ec3b15477dcfa905706
           path: rumiai-os
 
-      - name: Install managed Node.js runtime
+      - name: Select runner platform and install managed Node.js runtime
         shell: bash
         run: |
+          ./rumiai-os/m osarch update
           ./rumiai-os/m pkg install nodejs
           ./rumiai-os/m pkg default nodejs
           ./rumiai-os/m node --version
