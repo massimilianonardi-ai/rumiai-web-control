@@ -9,6 +9,8 @@ const HOME = webControlHome();
 const PROFILE = process.env.WEB_CONTROL_PROFILE || 'default';
 const SOCKET = webControlSocketPath();
 const PROFILE_DIR = process.env.WEB_CONTROL_PROFILE_DIR || path.join(HOME, 'profiles', PROFILE);
+const STORAGE_DIR = path.join(HOME, 'storage-state');
+const STORAGE_FILE = path.join(STORAGE_DIR, `${PROFILE}.json`);
 const HEADLESS = process.env.WEB_CONTROL_HEADLESS === '1';
 const EXECUTABLE = process.env.WEB_CONTROL_BROWSER_EXECUTABLE || undefined;
 const BROWSER_ARGS = process.env.WEB_CONTROL_BROWSER_ARGS ? JSON.parse(process.env.WEB_CONTROL_BROWSER_ARGS) : [];
@@ -18,7 +20,33 @@ if (!/^(?:[a-z0-9]|[a-z0-9][a-z0-9._-]*[a-z0-9])$/.test(PROFILE)) {
 }
 
 await fs.mkdir(PROFILE_DIR, { recursive: true });
+await fs.mkdir(STORAGE_DIR, { recursive: true, mode: 0o700 });
 await fs.mkdir(path.dirname(SOCKET), { recursive: true });
+
+async function loadStorageState() {
+  try {
+    const state = JSON.parse(await fs.readFile(STORAGE_FILE, 'utf8'));
+    if (!Array.isArray(state.cookies) || !Array.isArray(state.origins)) {
+      throw new Error('invalid storage-state shape');
+    }
+    return state;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw new Error(`cannot load profile storage state: ${error.message}`);
+  }
+}
+
+async function writeStorageState(state) {
+  const temporary = `${STORAGE_FILE}.${process.pid}.tmp`;
+  await fs.writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600
+  });
+  await fs.chmod(temporary, 0o600);
+  await fs.rename(temporary, STORAGE_FILE);
+}
+
+const savedStorageState = await loadStorageState();
 
 const context = await chromium.launchPersistentContext(PROFILE_DIR, {
   headless: HEADLESS,
@@ -27,6 +55,22 @@ const context = await chromium.launchPersistentContext(PROFILE_DIR, {
   viewport: { width: 1440, height: 1000 },
   args: BROWSER_ARGS
 });
+
+if (savedStorageState) {
+  if (savedStorageState.cookies.length) {
+    await context.addCookies(savedStorageState.cookies);
+  }
+
+  if (savedStorageState.origins.length) {
+    await context.addInitScript(({ origins }) => {
+      const current = origins.find(item => item.origin === location.origin);
+      if (!current) return;
+      for (const entry of current.localStorage || []) {
+        localStorage.setItem(entry.name, entry.value);
+      }
+    }, { origins: savedStorageState.origins });
+  }
+}
 
 let nextPageId = 1;
 const pages = new Map();
@@ -279,10 +323,24 @@ let stopping = false;
 async function shutdown(code) {
   if (stopping) return;
   stopping = true;
+  let exitCode = code;
+
   await new Promise((resolve) => server.close(resolve));
-  await context.close().catch(() => {});
-  await removeSocket().catch(() => {});
-  process.exit(code);
+
+  try {
+    await writeStorageState(await context.storageState());
+  } catch (error) {
+    exitCode = 1;
+    console.error(`web-control-service: cannot persist profile storage state: ${error.message}`);
+  }
+
+  await context.close().catch(() => {
+    exitCode = 1;
+  });
+  await removeSocket().catch(() => {
+    exitCode = 1;
+  });
+  process.exit(exitCode);
 }
 
 process.on('SIGINT', () => shutdown(0));
