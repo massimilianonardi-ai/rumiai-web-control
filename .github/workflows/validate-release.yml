@@ -30,21 +30,19 @@ jobs:
           ref: f4d28822c4a2a875bd816ec3b15477dcfa905706
           path: rumiai-os
 
-      - name: Install managed Node.js provider
+      - name: Install managed Node.js runtime
         shell: bash
         run: |
           ./rumiai-os/m pkg install nodejs
-          node_concrete=$(./rumiai-os/m pkg versions nodejs | tail -n 1)
-          test -n "$node_concrete"
-          ./rumiai-os/m pkg default "$node_concrete"
-          ./rumiai-os/m pkg provider default nodejs nodejs
+          ./rumiai-os/m pkg default nodejs
+          ./rumiai-os/m node --version
 
       - name: Install project dependency
         working-directory: rumiai-web-control
         shell: bash
         env:
           PLAYWRIGHT_BROWSERS_PATH: '0'
-        run: npm install
+        run: ../rumiai-os/m npm install
 
       - name: Install Playwright Chromium on Linux
         if: runner.os == 'Linux'
@@ -52,7 +50,7 @@ jobs:
         shell: bash
         env:
           PLAYWRIGHT_BROWSERS_PATH: '0'
-        run: npx playwright install --with-deps chromium
+        run: ../rumiai-os/m npx playwright install --with-deps chromium
 
       - name: Install Playwright Chromium on macOS
         if: runner.os == 'macOS'
@@ -60,7 +58,7 @@ jobs:
         shell: bash
         env:
           PLAYWRIGHT_BROWSERS_PATH: '0'
-        run: npx playwright install chromium
+        run: ../rumiai-os/m npx playwright install chromium
 
       - name: Run mk lifecycle
         shell: bash
