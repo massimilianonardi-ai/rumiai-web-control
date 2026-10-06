@@ -6,21 +6,21 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createFixtureServer } from './fixture-server.mjs';
+import { webControlSocketPath } from '../src/runtime.mjs';
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const work = await fs.mkdtemp(path.join(os.tmpdir(), 'rumiai-web-control-test-'));
 const home = path.join(work, 'home');
 const captureDir = path.join(work, 'capture');
-const socketPath = path.join(home, 'run', 'web-control.sock');
 const fixture = await createFixtureServer();
 
 const env = {
   ...process.env,
   WEB_CONTROL_HOME: home,
-  WEB_CONTROL_HEADLESS: '1',
-  PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || '0'
+  WEB_CONTROL_HEADLESS: '1'
 };
+const socketPath = webControlSocketPath(env);
 
 async function cli(...args) {
   const { stdout } = await execFileAsync(path.join(root, 'bin', 'web-control'), args, { cwd: root, env });

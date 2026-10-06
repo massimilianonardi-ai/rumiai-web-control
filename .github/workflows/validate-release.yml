@@ -26,15 +26,21 @@ jobs:
           ref: f4d28822c4a2a875bd816ec3b15477dcfa905706
           path: rumiai-os
 
-      - name: Select runner platform and install managed runtimes
+      - name: Select runner platform and install managed Node.js
         shell: bash
         run: |
           ./rumiai-os/m osarch update
-          ./rumiai-os/m pkg install nodejs chromium
+          ./rumiai-os/m pkg install nodejs
           ./rumiai-os/m pkg default nodejs
-          ./rumiai-os/m pkg default chromium
           ./rumiai-os/m node --version
-          ./rumiai-os/m chromium --version
+
+      - name: Resolve installed Chromium-class browser
+        shell: bash
+        run: |
+          browser=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || :)
+          test -n "$browser"
+          echo "WEB_CONTROL_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+          "$browser" --version
 
       - name: Install pinned JavaScript dependencies
         working-directory: rumiai-web-control

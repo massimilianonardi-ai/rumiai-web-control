@@ -1,10 +1,8 @@
 import net from 'node:net';
-import os from 'node:os';
-import path from 'node:path';
 import process from 'node:process';
+import { webControlSocketPath } from './runtime.mjs';
 
-const HOME = process.env.WEB_CONTROL_HOME || path.join(os.homedir(), '.rumiai-web-control');
-const SOCKET = process.env.WEB_CONTROL_SOCKET || path.join(HOME, 'run', 'web-control.sock');
+const SOCKET = webControlSocketPath();
 
 function usage() {
   return [

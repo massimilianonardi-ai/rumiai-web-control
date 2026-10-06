@@ -1,13 +1,13 @@
 import fs from 'node:fs/promises';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { chromium } from 'playwright';
+import { webControlHome, webControlSocketPath } from './runtime.mjs';
 
-const HOME = process.env.WEB_CONTROL_HOME || path.join(os.homedir(), '.rumiai-web-control');
+const HOME = webControlHome();
 const PROFILE = process.env.WEB_CONTROL_PROFILE || 'default';
-const SOCKET = process.env.WEB_CONTROL_SOCKET || path.join(HOME, 'run', 'web-control.sock');
+const SOCKET = webControlSocketPath();
 const PROFILE_DIR = process.env.WEB_CONTROL_PROFILE_DIR || path.join(HOME, 'profiles', PROFILE);
 const HEADLESS = process.env.WEB_CONTROL_HEADLESS === '1';
 const EXECUTABLE = process.env.WEB_CONTROL_BROWSER_EXECUTABLE || undefined;
@@ -228,6 +228,9 @@ async function removeSocket() {
   try {
     const stat = await fs.lstat(SOCKET);
     if (!stat.isSocket()) throw new Error(`refusing to remove non-socket path: ${SOCKET}`);
+    if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+      throw new Error(`refusing to remove socket not owned by current user: ${SOCKET}`);
+    }
     await fs.unlink(SOCKET);
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;

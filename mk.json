@@ -2,6 +2,7 @@
   "version": 2,
   "goals": {
     "check": [
+      "check-runtime",
       "check-controller",
       "check-client",
       "check-test",
@@ -85,6 +86,16 @@
         "args": [
           "run",
           "build"
+        ]
+      }
+    },
+    "check-runtime": {
+      "action": {
+        "type": "process",
+        "command": "node",
+        "args": [
+          "--check",
+          "src/runtime.mjs"
         ]
       }
     }
