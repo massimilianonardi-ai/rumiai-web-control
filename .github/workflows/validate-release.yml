@@ -34,7 +34,9 @@ jobs:
         shell: bash
         run: |
           ./rumiai-os/m pkg install nodejs
-          ./rumiai-os/m pkg default nodejs
+          node_concrete=$(./rumiai-os/m pkg versions nodejs | tail -n 1)
+          test -n "$node_concrete"
+          ./rumiai-os/m pkg default "$node_concrete"
           ./rumiai-os/m pkg provider default nodejs nodejs
 
       - name: Install project dependency
