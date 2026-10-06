@@ -11,6 +11,6 @@
     "build": "node scripts/build-release.mjs"
   },
   "dependencies": {
-    "playwright": "1.55.0"
+    "playwright": "1.63.0"
   }
 }
