@@ -24,6 +24,7 @@ jobs:
           path: rumiai-web-control
 
       - name: Checkout exact rumiai-os revision
+        if: runner.os == 'Linux'
         uses: actions/checkout@v4
         with:
           repository: massimilianonardi-ai/rumiai-os
@@ -31,6 +32,7 @@ jobs:
           path: rumiai-os
 
       - name: Select runner platform and install managed Node.js runtime
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           ./rumiai-os/m osarch update
@@ -38,12 +40,27 @@ jobs:
           ./rumiai-os/m pkg default nodejs
           ./rumiai-os/m node --version
 
-      - name: Install project dependency
+      - name: Prepare Node.js 26 fallback on macOS
+        if: runner.os == 'macOS'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      - name: Install project dependency on Linux
+        if: runner.os == 'Linux'
         working-directory: rumiai-web-control
         shell: bash
         env:
           PLAYWRIGHT_BROWSERS_PATH: '0'
         run: ../rumiai-os/m npm install
+
+      - name: Install project dependency on macOS
+        if: runner.os == 'macOS'
+        working-directory: rumiai-web-control
+        shell: bash
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: '0'
+        run: npm install
 
       - name: Install Playwright Chromium on Linux
         if: runner.os == 'Linux'
@@ -59,14 +76,30 @@ jobs:
         shell: bash
         env:
           PLAYWRIGHT_BROWSERS_PATH: '0'
-        run: ../rumiai-os/m npx playwright install chromium
+        run: npx playwright install chromium
 
-      - name: Run mk lifecycle
+      - name: Run canonical mk lifecycle on Linux
+        if: runner.os == 'Linux'
         shell: bash
         env:
           PLAYWRIGHT_BROWSERS_PATH: '0'
         run: |
           ./rumiai-os/m mk --project "$(pwd)/rumiai-web-control" check test build
+
+      - name: Run equivalent runtime/build validation on macOS
+        if: runner.os == 'macOS'
+        working-directory: rumiai-web-control
+        shell: bash
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: '0'
+        run: |
+          node --version
+          node --check src/controller.mjs
+          node --check src/client.mjs
+          node --check tests/run.mjs
+          node --check scripts/build-release.mjs
+          npm test
+          npm run build
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
