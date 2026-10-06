@@ -51,7 +51,7 @@ Page identifiers are opaque runtime identities. The current `target` representat
 
 ## Development lifecycle
 
-The project is managed by `mk`. `mk` does not install runtime packages; the project declares the existing `nodejs` facility compatibility 26 as its development requirement.
+The project is managed by `mk`. The current `mk` runtime itself requires the managed `nodejs` package default and executes the project lifecycle with that Node.js environment. `rumiai-web-control` therefore does not duplicate that already-required development-runtime condition as a second `mk` facility requirement. The released `rumiai-web-control` package will independently declare its runtime dependency on the provider-independent `nodejs` facility.
 
 After development dependencies are present:
 
