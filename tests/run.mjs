@@ -51,24 +51,6 @@ async function stopService(child) {
   });
 }
 
-async function waitForServiceExit(child, timeoutMs = 10000) {
-  if (child.exitCode !== null) return child.exitCode;
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      child.off('exit', onExit);
-      reject(new Error('web-control service did not exit after browser closure'));
-    }, timeoutMs);
-
-    function onExit(code) {
-      clearTimeout(timer);
-      resolve(code);
-    }
-
-    child.once('exit', onExit);
-  });
-}
-
 async function sendControllerMessage(message) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(socketPath);
@@ -102,6 +84,7 @@ try {
   const status = await cli('status');
   assert.equal(status.profile, 'default');
   assert.equal(status.headless, env.WEB_CONTROL_HEADLESS === '1');
+  assert.equal(status.browserRunning, true);
   assert.doesNotMatch(await managedBrowserCommandLine(), /(?:^|\s)--no-sandbox(?:\s|$)/);
 
   const page = await cli('page', 'new');
@@ -159,11 +142,24 @@ try {
     method: 'debug.cdp',
     params: { page: page2.id, method: 'Browser.close', params: {} }
   });
-  assert.equal(await waitForServiceExit(service), 0);
-  service = null;
 
-  service = await startService();
+  let closedStatus;
+  for (let i = 0; i < 80; i += 1) {
+    closedStatus = await cli('status');
+    if (closedStatus.browserRunning === false) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(closedStatus.browserRunning, false);
+  assert.equal(service.exitCode, null);
+  assert.deepEqual(closedStatus.pages, []);
+
+  const servicePid = service.pid;
   const page3 = await cli('page', 'new');
+  assert.equal(service.pid, servicePid);
+  const relaunchedStatus = await cli('status');
+  assert.equal(relaunchedStatus.browserRunning, true);
+  assert.doesNotMatch(await managedBrowserCommandLine(), /(?:^|\s)--no-sandbox(?:\s|$)/);
+
   await cli('page', 'navigate', page3.id, `${fixture.baseUrl}/account`);
   const storageAfterBrowserClose = await cli('page', 'inspect', page3.id, 'storage');
   assert.equal(storageAfterBrowserClose.local.poc_session, 'external-close');
@@ -183,8 +179,10 @@ try {
       'HTML/text/PNG/MHTML capture',
       'page-scoped CDP',
       'cookie/localStorage persistence across service restart',
-      'external browser closure terminates service',
-      'persistent profile survives external browser closure'
+      'external browser closure keeps controller service alive',
+      'status detects absent browser without relaunching it',
+      'page creation relaunches browser on demand',
+      'persistent profile survives browser relaunch'
     ]
   }, null, 2)}\n`);
 } finally {

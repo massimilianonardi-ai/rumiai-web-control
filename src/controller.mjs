@@ -46,39 +46,13 @@ async function writeStorageState(state) {
   await fs.rename(temporary, STORAGE_FILE);
 }
 
-const savedStorageState = await loadStorageState();
-
-const context = await chromium.launchPersistentContext(PROFILE_DIR, {
-  headless: HEADLESS,
-  executablePath: EXECUTABLE,
-  chromiumSandbox: true,
-  handleSIGHUP: false,
-  handleSIGINT: false,
-  handleSIGTERM: false,
-  acceptDownloads: true,
-  viewport: { width: 1440, height: 1000 },
-  args: BROWSER_ARGS
-});
-
-if (savedStorageState) {
-  if (savedStorageState.cookies.length) {
-    await context.addCookies(savedStorageState.cookies);
-  }
-
-  if (savedStorageState.origins.length) {
-    await context.addInitScript(({ origins }) => {
-      const current = origins.find(item => item.origin === location.origin);
-      if (!current) return;
-      for (const entry of current.localStorage || []) {
-        localStorage.setItem(entry.name, entry.value);
-      }
-    }, { origins: savedStorageState.origins });
-  }
-}
+let savedStorageState = await loadStorageState();
 
 let nextPageId = 1;
 const pages = new Map();
 const pageIds = new WeakMap();
+let context = null;
+let browserStart = null;
 
 function registerPage(page) {
   let id = pageIds.get(page);
@@ -90,8 +64,63 @@ function registerPage(page) {
   return id;
 }
 
-for (const page of context.pages()) registerPage(page);
-context.on('page', registerPage);
+async function launchBrowser() {
+  const launchedContext = await chromium.launchPersistentContext(PROFILE_DIR, {
+    headless: HEADLESS,
+    executablePath: EXECUTABLE,
+    chromiumSandbox: true,
+    handleSIGHUP: false,
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    acceptDownloads: true,
+    viewport: { width: 1440, height: 1000 },
+    args: BROWSER_ARGS
+  });
+
+  context = launchedContext;
+  launchedContext.once('close', () => {
+    if (context === launchedContext) {
+      context = null;
+      pages.clear();
+    }
+  });
+
+  if (savedStorageState) {
+    if (savedStorageState.cookies.length) {
+      await launchedContext.addCookies(savedStorageState.cookies);
+    }
+
+    if (savedStorageState.origins.length) {
+      await launchedContext.addInitScript(({ origins }) => {
+        const current = origins.find(item => item.origin === location.origin);
+        if (!current) return;
+        for (const entry of current.localStorage || []) {
+          localStorage.setItem(entry.name, entry.value);
+        }
+      }, { origins: savedStorageState.origins });
+    }
+
+    savedStorageState = null;
+  }
+
+  for (const page of launchedContext.pages()) registerPage(page);
+  launchedContext.on('page', registerPage);
+  return launchedContext;
+}
+
+async function ensureBrowser() {
+  if (context) return context;
+
+  if (!browserStart) {
+    browserStart = launchBrowser().finally(() => {
+      browserStart = null;
+    });
+  }
+
+  return browserStart;
+}
+
+await ensureBrowser();
 
 function requirePage(id) {
   const page = pages.get(id);
@@ -108,7 +137,7 @@ async function describePage(id, page) {
 }
 
 async function inspectStorage(page) {
-  const cookies = await context.cookies();
+  const cookies = await page.context().cookies();
   const storage = await page.evaluate(() => {
     const local = {};
     const session = {};
@@ -158,7 +187,7 @@ async function capturePage(pageId, page, params) {
 
   if (formats.includes('mhtml')) {
     const filename = path.join(outputDir, 'page.mhtml');
-    const cdp = await context.newCDPSession(page);
+    const cdp = await page.context().newCDPSession(page);
     try {
       const snapshot = await cdp.send('Page.captureSnapshot', { format: 'mhtml' });
       await fs.writeFile(filename, snapshot.data, 'utf8');
@@ -187,11 +216,13 @@ async function dispatch(method, params = {}) {
       return {
         profile: PROFILE,
         headless: HEADLESS,
+        browserRunning: context !== null,
         pages: await Promise.all([...pages].map(([id, page]) => describePage(id, page)))
       };
 
     case 'page.new': {
-      const page = await context.newPage();
+      const activeContext = await ensureBrowser();
+      const page = await activeContext.newPage();
       return describePage(registerPage(page), page);
     }
 
@@ -259,7 +290,7 @@ async function dispatch(method, params = {}) {
     case 'debug.cdp': {
       const page = requirePage(params.page);
       if (!params.method || typeof params.method !== 'string') throw new Error('debug.cdp requires method');
-      const cdp = await context.newCDPSession(page);
+      const cdp = await page.context().newCDPSession(page);
       try {
         return await cdp.send(params.method, params.params || {});
       } finally {
@@ -335,7 +366,7 @@ async function closeServer() {
   });
 }
 
-async function shutdown(code, { contextClosed = false } = {}) {
+async function shutdown(code) {
   if (stopping) return;
   stopping = true;
   let exitCode = code;
@@ -344,19 +375,16 @@ async function shutdown(code, { contextClosed = false } = {}) {
     exitCode = 1;
   });
 
-  if (contextClosed) {
-    await fs.unlink(STORAGE_FILE).catch((error) => {
-      if (error?.code !== 'ENOENT') exitCode = 1;
-    });
-  } else {
+  const activeContext = context;
+  if (activeContext) {
     try {
-      await writeStorageState(await context.storageState());
+      await writeStorageState(await activeContext.storageState());
     } catch (error) {
       exitCode = 1;
       console.error(`web-control-service: cannot persist profile storage state: ${error.message}`);
     }
 
-    await context.close().catch(() => {
+    await activeContext.close().catch(() => {
       exitCode = 1;
     });
   }
@@ -366,10 +394,6 @@ async function shutdown(code, { contextClosed = false } = {}) {
   });
   process.exit(exitCode);
 }
-
-context.once('close', () => {
-  if (!stopping) void shutdown(0, { contextClosed: true });
-});
 
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
