@@ -18,25 +18,14 @@ const fixture = await createFixtureServer();
 const env = {
   ...process.env,
   WEB_CONTROL_HOME: home,
-  WEB_CONTROL_HEADLESS: process.env.WEB_CONTROL_TEST_HEADLESS ?? '1'
+  WEB_CONTROL_HEADLESS: process.env.WEB_CONTROL_TEST_HEADLESS ?? '1',
+  WEB_CONTROL_CONNECT_TIMEOUT_MS: '15000'
 };
 const socketPath = webControlSocketPath(env);
 
 async function cli(...args) {
   const { stdout } = await execFileAsync(path.join(root, 'bin', 'web-control'), args, { cwd: root, env });
   return JSON.parse(stdout);
-}
-
-async function waitForSocket(child) {
-  for (let i = 0; i < 200; i += 1) {
-    if (child.exitCode !== null) throw new Error(`service exited early with ${child.exitCode}`);
-    try {
-      const stat = await fs.stat(socketPath);
-      if (stat.isSocket()) return;
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error('service socket did not become ready');
 }
 
 async function startService() {
@@ -50,7 +39,6 @@ async function startService() {
   child.once('exit', code => {
     if (code && stderr) process.stderr.write(stderr);
   });
-  await waitForSocket(child);
   return child;
 }
 
@@ -129,6 +117,7 @@ try {
   process.stdout.write(`${JSON.stringify({
     ok: true,
     checks: [
+      'immediate client readiness after service spawn',
       'public command/status',
       'dynamic rendered DOM',
       'deterministic fill/click',
