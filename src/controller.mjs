@@ -51,6 +51,7 @@ const savedStorageState = await loadStorageState();
 const context = await chromium.launchPersistentContext(PROFILE_DIR, {
   headless: HEADLESS,
   executablePath: EXECUTABLE,
+  chromiumSandbox: true,
   handleSIGHUP: false,
   handleSIGINT: false,
   handleSIGTERM: false,
@@ -323,28 +324,52 @@ await fs.chmod(SOCKET, 0o600);
 console.log(JSON.stringify({ event: 'ready', socket: SOCKET, profile: PROFILE, headless: HEADLESS }));
 
 let stopping = false;
-async function shutdown(code) {
+
+async function closeServer() {
+  if (!server.listening) return;
+  await new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+async function shutdown(code, { contextClosed = false } = {}) {
   if (stopping) return;
   stopping = true;
   let exitCode = code;
 
-  await new Promise((resolve) => server.close(resolve));
-
-  try {
-    await writeStorageState(await context.storageState());
-  } catch (error) {
-    exitCode = 1;
-    console.error(`web-control-service: cannot persist profile storage state: ${error.message}`);
-  }
-
-  await context.close().catch(() => {
+  await closeServer().catch(() => {
     exitCode = 1;
   });
+
+  if (contextClosed) {
+    await fs.unlink(STORAGE_FILE).catch((error) => {
+      if (error?.code !== 'ENOENT') exitCode = 1;
+    });
+  } else {
+    try {
+      await writeStorageState(await context.storageState());
+    } catch (error) {
+      exitCode = 1;
+      console.error(`web-control-service: cannot persist profile storage state: ${error.message}`);
+    }
+
+    await context.close().catch(() => {
+      exitCode = 1;
+    });
+  }
+
   await removeSocket().catch(() => {
     exitCode = 1;
   });
   process.exit(exitCode);
 }
+
+context.once('close', () => {
+  if (!stopping) void shutdown(0, { contextClosed: true });
+});
 
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
@@ -50,6 +51,42 @@ async function stopService(child) {
   });
 }
 
+async function waitForServiceExit(child, timeoutMs = 10000) {
+  if (child.exitCode !== null) return child.exitCode;
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      reject(new Error('web-control service did not exit after browser closure'));
+    }, timeoutMs);
+
+    function onExit(code) {
+      clearTimeout(timer);
+      resolve(code);
+    }
+
+    child.once('exit', onExit);
+  });
+}
+
+async function sendControllerMessage(message) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(socketPath);
+    socket.once('error', reject);
+    socket.once('connect', () => {
+      socket.end(`${JSON.stringify(message)}\n`, resolve);
+    });
+  });
+}
+
+async function managedBrowserCommandLine() {
+  const profileDir = path.join(home, 'profiles', 'default');
+  const { stdout } = await execFileAsync('ps', ['-ax', '-o', 'command='], { env });
+  const commandLine = stdout.split('\n').find((line) => line.includes(`--user-data-dir=${profileDir}`));
+  assert.ok(commandLine, 'managed Chromium process not found');
+  return commandLine;
+}
+
 async function waitForText(page, pattern) {
   for (let i = 0; i < 80; i += 1) {
     const result = await cli('page', 'inspect', page, 'text');
@@ -65,6 +102,7 @@ try {
   const status = await cli('status');
   assert.equal(status.profile, 'default');
   assert.equal(status.headless, env.WEB_CONTROL_HEADLESS === '1');
+  assert.doesNotMatch(await managedBrowserCommandLine(), /(?:^|\s)--no-sandbox(?:\s|$)/);
 
   const page = await cli('page', 'new');
   await cli('page', 'navigate', page.id, fixture.baseUrl);
@@ -111,6 +149,25 @@ try {
   assert.equal(storage.local.poc_session, 'active');
   assert.ok(storage.cookies.some(cookie => cookie.name === 'poc_session' && cookie.value === 'active'));
 
+  await cli('debug', 'cdp', page2.id, 'Runtime.evaluate', JSON.stringify({
+    expression: "localStorage.setItem('poc_session', 'external-close')"
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  await sendControllerMessage({
+    id: 99,
+    method: 'debug.cdp',
+    params: { page: page2.id, method: 'Browser.close', params: {} }
+  });
+  assert.equal(await waitForServiceExit(service), 0);
+  service = null;
+
+  service = await startService();
+  const page3 = await cli('page', 'new');
+  await cli('page', 'navigate', page3.id, `${fixture.baseUrl}/account`);
+  const storageAfterBrowserClose = await cli('page', 'inspect', page3.id, 'storage');
+  assert.equal(storageAfterBrowserClose.local.poc_session, 'external-close');
+
   await stopService(service);
   service = null;
 
@@ -119,12 +176,15 @@ try {
     checks: [
       'immediate client readiness after service spawn',
       'public command/status',
+      'Chromium sandbox enabled by default',
       'dynamic rendered DOM',
       'deterministic fill/click',
       'popup page registration',
       'HTML/text/PNG/MHTML capture',
       'page-scoped CDP',
-      'cookie/localStorage persistence across service restart'
+      'cookie/localStorage persistence across service restart',
+      'external browser closure terminates service',
+      'persistent profile survives external browser closure'
     ]
   }, null, 2)}\n`);
 } finally {
