@@ -4,6 +4,18 @@ import { webControlSocketPath } from './runtime.mjs';
 
 const SOCKET = webControlSocketPath();
 
+function connectTimeoutMs() {
+  const raw = process.env.WEB_CONTROL_CONNECT_TIMEOUT_MS;
+  if (raw === undefined || raw === '') return 15000;
+  if (!/^[0-9]+$/.test(raw)) throw new Error('WEB_CONTROL_CONNECT_TIMEOUT_MS must be a non-negative integer');
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) throw new Error('WEB_CONTROL_CONNECT_TIMEOUT_MS is too large');
+  return value;
+}
+
+const CONNECT_TIMEOUT_MS = connectTimeoutMs();
+const CONNECT_RETRY_MS = 100;
+
 function usage() {
   return [
     'usage:',
@@ -55,16 +67,37 @@ function parse(argv) {
   invalid('invalid invocation');
 }
 
-async function request(message) {
+function connectOnce() {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(SOCKET);
+    socket.once('connect', () => resolve(socket));
+    socket.once('error', reject);
+  });
+}
+
+async function connectReady() {
+  const deadline = Date.now() + CONNECT_TIMEOUT_MS;
+
+  while (true) {
+    try {
+      return await connectOnce();
+    } catch (error) {
+      const retryable = error?.code === 'ENOENT' || error?.code === 'ECONNREFUSED';
+      if (!retryable || Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_MS));
+    }
+  }
+}
+
+async function request(message) {
+  const socket = await connectReady();
+
+  return new Promise((resolve, reject) => {
     socket.setEncoding('utf8');
     let buffer = '';
 
     socket.once('error', reject);
-    socket.once('connect', () => {
-      socket.write(`${JSON.stringify({ id: 1, ...message })}\n`);
-    });
+    socket.write(`${JSON.stringify({ id: 1, ...message })}\n`);
     socket.on('data', (chunk) => {
       buffer += chunk;
       const newline = buffer.indexOf('\n');
