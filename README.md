@@ -25,7 +25,7 @@ web-control status
 srv stop web-control
 ```
 
-The package launcher supplies an isolated package HOME. `web-control-service` stores its default persistent browser profile below that HOME. The local Unix-domain control socket uses a short `/tmp` pathname derived from the effective user and package HOME so it remains below macOS/Linux Unix-socket pathname limits while still separating package/state instances. An explicit `WEB_CONTROL_SOCKET` can override that pathname. The socket is mode `0600`, stale sockets owned by another user are never removed, and raw browser debugger ports are not published.
+The package launcher supplies an isolated package HOME. `web-control-service` stores its default persistent browser profile below that HOME. The local Unix-domain control socket uses a short `/tmp` pathname derived from the effective user and package HOME so it remains below macOS/Linux Unix-socket pathname limits while still separating package/state instances. An explicit `WEB_CONTROL_SOCKET` can override that pathname. The socket is mode `0600`, stale sockets owned by another user are never removed, and raw browser debugger ports are not published. Because `srv start` guarantees process survival rather than application-specific readiness, the client retries a missing/refused local socket for up to 15 seconds by default; `WEB_CONTROL_CONNECT_TIMEOUT_MS` can override that bounded startup wait.
 
 The ordinary browser mode is visible (`headless=false`). `WEB_CONTROL_HEADLESS=1` exists for automated validation and non-graphical environments.
 
