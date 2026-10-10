@@ -8,7 +8,7 @@ const packageJson = JSON.parse(await fs.readFile(path.join(root, 'package.json')
 
 const dist = path.join(root, 'dist');
 const stageRoot = path.join(dist, 'stage');
-const productRoot = path.join(stageRoot, 'rumiai-web-control');
+const productRoot = path.join(stageRoot, 'pwc-web-control');
 
 await fs.rm(dist, { recursive: true, force: true });
 await fs.mkdir(productRoot, { recursive: true });
@@ -20,11 +20,11 @@ for (const entry of ['README.md', 'package.json', 'bin', 'src', 'node_modules'])
   });
 }
 
-const artifactName = `rumiai-web-control-v${packageJson.version}-all.tar.gz`;
+const artifactName = `pwc-web-control-v${packageJson.version}-all.tar.gz`;
 const artifact = path.join(dist, artifactName);
 
 await new Promise((resolve, reject) => {
-  const child = spawn('tar', ['-czf', artifact, '-C', stageRoot, 'rumiai-web-control'], {
+  const child = spawn('tar', ['-czf', artifact, '-C', stageRoot, 'pwc-web-control'], {
     stdio: 'inherit'
   });
   child.once('error', reject);

@@ -11,7 +11,7 @@ import { webControlSocketPath } from '../src/runtime.mjs';
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const work = await fs.mkdtemp(path.join(os.tmpdir(), 'rumiai-web-control-test-'));
+const work = await fs.mkdtemp(path.join(os.tmpdir(), 'pwc-web-control-test-'));
 const home = path.join(work, 'home');
 const captureDir = path.join(work, 'capture');
 const fixture = await createFixtureServer();

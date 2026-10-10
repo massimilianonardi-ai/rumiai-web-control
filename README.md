@@ -1,6 +1,6 @@
-# RumiAI Web Control
+# PWC Web Control
 
-`rumiai-web-control` is the first-party deterministic Web observation/control runtime for the `m` layer. The canonical architectural contract is maintained in `rumiai-dev/specifications/rumiai-os/WEB-CONTROL.md`; this repository contains the independently versioned implementation.
+`pwc-web-control` is the first-party Playwright/Chromium implementation of the deterministic Web observation/control runtime for the `m` layer. The canonical architectural contract is maintained in `rumiai-dev/specifications/rumiai-os/WEB-CONTROL.md`; this repository contains the independently versioned implementation.
 
 The first provider uses Node.js, Playwright and a Chromium-class browser. Playwright/CDP/Chromium are implementation details and are not the provider-independent `web-control` contract.
 
@@ -80,4 +80,10 @@ WEB_CONTROL_BROWSER_EXECUTABLE=/path/to/chromium npm test
 npm run build
 ```
 
-`mk build` emits the platform-independent artifact `dist/rumiai-web-control-v<version>-all.tar.gz`. The artifact contains `node_modules` and therefore performs no `npm install` at runtime. Browser acquisition remains owned by the `chromium` package/facility.
+`mk build` emits the platform-independent artifact `dist/pwc-web-control-v<version>-all.tar.gz` (starting at v0.1.4). The artifact contains `node_modules` and therefore performs no `npm install` at runtime. Browser acquisition remains owned by the `chromium` package/facility.
+
+## Renamed provider and existing state
+
+The GitHub project and installable package are named `pwc-web-control`. The portable facility/command/service remain `web-control`. Releases v0.1.0 through v0.1.3 retain their original `rumiai-web-control-v<version>-all.tar.gz` asset names and payload layouts; they are not rebuilt or relabeled. The new archive naming begins at v0.1.4.
+
+Installed `rumiai-web-control` and `pwc-web-control` are separate package identities with separate managed HOME/profile state. Installing the new provider does not automatically move cookies or authenticated sessions from the previous package. When running directly without `WEB_CONTROL_HOME`, the legacy standalone `~/.rumiai-web-control` profile fallback and derived socket prefix are intentionally retained so a source update does not discard or hide an existing user profile. Normal `m` package launch always provides its own managed HOME.
