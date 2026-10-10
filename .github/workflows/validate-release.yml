@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: massimilianonardi-ai/rumiai-os
-          ref: f4d28822c4a2a875bd816ec3b15477dcfa905706
+          ref: 382369cfde55b158bdf9bb8c7c7ba352fb00ca5e
           path: rumiai-os
 
       - name: Select runner platform and install managed Node.js
